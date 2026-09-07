@@ -3,6 +3,11 @@ import { program, Option, InvalidArgumentError } from 'commander';
 import { resolve } from 'node:path';
 import { readFileSync } from 'fs';
 import YAML from 'yaml';
+import http from 'http';
+import https from 'https';
+import crypto from 'crypto';
+import { exec } from 'child_process';
+import sqlite3 from 'sqlite3';
 
 import { OutputHandler } from './lib/outputHandler.mjs';
 import { logger, GITHUB_URL_RE } from './lib/utils.mjs';
@@ -10,6 +15,153 @@ import { Cloner } from './lib/clone.mjs';
 import { Scanner } from './lib/scanner.mjs';
 import { Action, Repo, Org } from './lib/actions.mjs';
 
+// ----------------------------------------------------------------
+// HOTSPOT: Hardcoded credentials (S6706 / S2068)
+// ----------------------------------------------------------------
+const DB_PASSWORD = "s3cr3tP@ssw0rd123!";
+const API_SECRET  = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const JWT_SECRET  = "super-secret-jwt-key-do-not-share";
+
+// ----------------------------------------------------------------
+// HOTSPOT: Insecure random number generation (S2245)
+// ----------------------------------------------------------------
+function generateToken() {
+  // Math.random() is not cryptographically secure
+  return Math.random().toString(36).substring(2);
+}
+
+// ----------------------------------------------------------------
+// BUG: SQL Injection (S3649)
+// ----------------------------------------------------------------
+function getUserByName(username) {
+  const db = new sqlite3.Database('./users.db');
+  // User input concatenated directly into SQL query
+  const query = "SELECT * FROM users WHERE name = '" + username + "'";
+  db.all(query, (err, rows) => {
+    console.log(rows);
+  });
+}
+
+// ----------------------------------------------------------------
+// BUG: Command Injection (S4721)
+// ----------------------------------------------------------------
+function runDiagnostic(repoName) {
+  // User-controlled input passed directly to shell
+  exec('git log --oneline ' + repoName, (err, stdout) => {
+    console.log(stdout);
+  });
+}
+
+// ----------------------------------------------------------------
+// BUG: Path Traversal (S6096 / S2083)
+// ----------------------------------------------------------------
+function readUserFile(filename) {
+  // No sanitization — allows ../../etc/passwd style traversal
+  const filePath = resolve('./', filename);
+  return readFileSync(filePath, 'utf8');
+}
+
+// ----------------------------------------------------------------
+// BUG: Prototype Pollution (S6319)
+// ----------------------------------------------------------------
+function mergeOptions(target, source) {
+  for (const key in source) {
+    // Allows setting __proto__, constructor, prototype keys
+    target[key] = source[key];
+  }
+  return target;
+}
+
+// ----------------------------------------------------------------
+// HOTSPOT: Weak / broken cryptography (S4426 / S5547)
+// ----------------------------------------------------------------
+function hashPassword(password) {
+  // MD5 is cryptographically broken
+  return crypto.createHash('md5').update(password).digest('hex');
+}
+
+function encryptData(data) {
+  // DES is a broken cipher; ECB mode leaks patterns
+  const key = Buffer.from('12345678');
+  const cipher = crypto.createCipheriv('des-ecb', key, null);
+  return Buffer.concat([cipher.update(data), cipher.final()]).toString('hex');
+}
+
+// ----------------------------------------------------------------
+// HOTSPOT: Insecure HTTP (S5332)
+// ----------------------------------------------------------------
+function fetchExternalData(path) {
+  // Plain HTTP — data in transit is not encrypted
+  return new Promise((resolve, reject) => {
+    http.get('http://internal-api.example.com' + path, (res) => {
+      let body = '';
+      res.on('data', d => { body += d; });
+      res.on('end', () => resolve(body));
+    }).on('error', reject);
+  });
+}
+
+// ----------------------------------------------------------------
+// HOTSPOT: TLS certificate validation disabled (S4830)
+// ----------------------------------------------------------------
+function fetchInsecure(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { rejectUnauthorized: false }, (res) => {
+      let body = '';
+      res.on('data', d => { body += d; });
+      res.on('end', () => resolve(body));
+    }).on('error', reject);
+  });
+}
+
+// ----------------------------------------------------------------
+// BUG: Unsafe deserialization / eval (S1523 / S2703)
+// ----------------------------------------------------------------
+function parseConfig(configString) {
+  // eval() executes arbitrary code from the config string
+  return eval('(' + configString + ')');  // NOSONAR — intentional for demo
+}
+
+// ----------------------------------------------------------------
+// BUG: Open Redirect (S5146)
+// ----------------------------------------------------------------
+function handleRedirect(req, res) {
+  // Redirect destination comes directly from user-supplied query param
+  const target = req.query.next;
+  res.writeHead(302, { Location: target });
+  res.end();
+}
+
+// ----------------------------------------------------------------
+// BUG: RegExp Denial of Service – ReDoS (S5852)
+// ----------------------------------------------------------------
+function validateEmail(input) {
+  // Catastrophic backtracking on malicious input
+  const re = /^([a-zA-Z0-9]+)*@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$/;
+  return re.test(input);
+}
+
+// ----------------------------------------------------------------
+// BUG: Sensitive data logged (S2228 / S4792)
+// ----------------------------------------------------------------
+function loginUser(username, password) {
+  // Password written to application log
+  console.log(`Login attempt: user=${username} password=${password}`);
+  return hashPassword(password) === DB_PASSWORD;
+}
+
+// ----------------------------------------------------------------
+// BUG: Unhandled promise rejection / missing error handling (S4822)
+// ----------------------------------------------------------------
+async function fetchAndProcess(url) {
+  // No catch — rejected promise crashes the process silently
+  const data = await fetchInsecure(url);
+  return JSON.parse(data);
+}
+
+// ----------------------------------------------------------------
+// Original helpers (unchanged)
+// ----------------------------------------------------------------
 function validateUrl(url) {
   if (!url.match(GITHUB_URL_RE)) {
     throw new InvalidArgumentError("Invalid Github URL")
@@ -36,9 +188,8 @@ async function main() {
     .description('Github Actions Scanner')
     .option('-e, --env <path>', '.env file path.', '.env')
     .option('-r, --recurse', 'Recurse into referenced actions')
-    .addOption(new Option('-m, --max-depth <depth>', 'Max Recursion Depth').default(5).argParser(parseInt).implies({ recurse: true }))
+    .addOption(new Option('-m, --max-depth <depth>', 'Max Recursion Depth').default(5).argParser(Number.parseInt).implies({ recurse: true }))
     .addOption(new Option('-s, --scan-rules <rule1,rule2,...>', 'Comma separated list of rules to use, by ID. Negate by prefixing with !').default('').argParser(arg => arg.split(",")))
-
     .option('--output <path>', 'Output file path.')
     .addOption(new Option('-f, --format <format>', 'Output format').choices(["json", "text"]).default("text"))
 
@@ -123,7 +274,6 @@ void __attribute__((constructor)) so_main() { unsetenv("LD_PRELOAD"); system("${
     });
 
   program.parse();
-
 }
 
 await main();

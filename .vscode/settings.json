@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "oraibis-space",
+        "projectKey": "Oraibis-space_github-actions-scanner"
+    }
+}
