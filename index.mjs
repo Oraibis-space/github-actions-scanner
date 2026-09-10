@@ -81,10 +81,12 @@ function hashPassword(password) {
 }
 
 function encryptData(data) {
-  // DES is a broken cipher; ECB mode leaks patterns
-  const key = Buffer.from('12345678');
-  const cipher = crypto.createCipheriv('des-ecb', key, null);
-  return Buffer.concat([cipher.update(data), cipher.final()]).toString('hex');
+  const key = crypto.randomBytes(32);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]).toString('hex');
 }
 
 // ----------------------------------------------------------------
