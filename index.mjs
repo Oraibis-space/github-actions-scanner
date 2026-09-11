@@ -76,8 +76,7 @@ function mergeOptions(target, source) {
 // HOTSPOT: Weak / broken cryptography (S4426 / S5547)
 // ----------------------------------------------------------------
 function hashPassword(password) {
-  // MD5 is cryptographically broken
-  return crypto.createHash('md5').update(password).digest('hex');
+  return crypto.createHash('sha512').update(password).digest('hex');
 }
 
 function encryptData(data) {
@@ -137,7 +136,7 @@ function handleRedirect(req, res) {
 // ----------------------------------------------------------------
 function validateEmail(input) {
   // Catastrophic backtracking on malicious input
-  const re = /^([a-zA-Z0-9]+)*@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$/;
+  const re = /^[a-zA-Z0-9]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$/;
   return re.test(input);
 }
 
