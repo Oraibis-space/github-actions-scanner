@@ -76,15 +76,16 @@ function mergeOptions(target, source) {
 // HOTSPOT: Weak / broken cryptography (S4426 / S5547)
 // ----------------------------------------------------------------
 function hashPassword(password) {
-  // MD5 is cryptographically broken
-  return crypto.createHash('md5').update(password).digest('hex');
+  return crypto.createHash('sha512').update(password).digest('hex');
 }
 
 function encryptData(data) {
-  // DES is a broken cipher; ECB mode leaks patterns
-  const key = Buffer.from('12345678');
-  const cipher = crypto.createCipheriv('des-ecb', key, null);
-  return Buffer.concat([cipher.update(data), cipher.final()]).toString('hex');
+  const key = crypto.randomBytes(32);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]).toString('hex');
 }
 
 // ----------------------------------------------------------------
@@ -137,7 +138,7 @@ function handleRedirect(req, res) {
 // ----------------------------------------------------------------
 function validateEmail(input) {
   // Catastrophic backtracking on malicious input
-  const re = /^([a-zA-Z0-9]+)*@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$/;
+  const re = /^[a-zA-Z0-9]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$/;
   return re.test(input);
 }
 
