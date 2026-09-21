@@ -26,8 +26,7 @@ const JWT_SECRET  = "super-secret-jwt-key-do-not-share";
 // HOTSPOT: Insecure random number generation (S2245)
 // ----------------------------------------------------------------
 function generateToken() {
-  // Math.random() is not cryptographically secure
-  return Math.random().toString(36).substring(2);
+  return crypto.randomBytes(16).toString('hex');
 }
 
 // ----------------------------------------------------------------
