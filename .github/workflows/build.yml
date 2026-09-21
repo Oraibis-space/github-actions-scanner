@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+      - ITR
   pull_request:
     types: [opened, synchronize, reopened]
 jobs:
