@@ -3,8 +3,8 @@ import { program, Option, InvalidArgumentError } from 'commander';
 import { resolve } from 'node:path';
 import { readFileSync } from 'fs';
 import YAML from 'yaml';
-import http from 'http';
-import https from 'https';
+import http from 'node:http';
+import https from 'node:https';
 import crypto from 'crypto';
 import { exec } from 'child_process';
 import sqlite3 from 'sqlite3';
@@ -77,14 +77,16 @@ function mergeOptions(target, source) {
 // ----------------------------------------------------------------
 function hashPassword(password) {
   // MD5 is cryptographically broken
-  return crypto.createHash('md5').update(password).digest('hex');
+  return crypto.createHash('sha256').update(password).digest('hex');
 }
 
 function encryptData(data) {
-  // DES is a broken cipher; ECB mode leaks patterns
-  const key = Buffer.from('12345678');
-  const cipher = crypto.createCipheriv('des-ecb', key, null);
-  return Buffer.concat([cipher.update(data), cipher.final()]).toString('hex');
+  const key = crypto.createHash('sha256').update('application-encryption-key').digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]).toString('hex');
 }
 
 // ----------------------------------------------------------------
@@ -137,19 +139,19 @@ function handleRedirect(req, res) {
 // ----------------------------------------------------------------
 function validateEmail(input) {
   // Catastrophic backtracking on malicious input
-  const re = /^([a-zA-Z0-9]+)*@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$/;
+  const re = /^[a-zA-Z0-9]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,}$/;
   return re.test(input);
 }
 
 // ----------------------------------------------------------------
 // BUG: Sensitive data logged (S2228 / S4792)
 // ----------------------------------------------------------------
+export { validateEmail };
+
 function loginUser(username, password) {
-  // Password written to application log
-  console.log(`Login attempt: user=${username} password=${password}`);
+  console.log(`Login attempt: user=${username}`);
   return hashPassword(password) === DB_PASSWORD;
 }
-
 // ----------------------------------------------------------------
 // BUG: Unhandled promise rejection / missing error handling (S4822)
 // ----------------------------------------------------------------
